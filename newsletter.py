@@ -34,6 +34,8 @@ parser.add_option( '-s', '--subject', default='Newsletter der Fachschaft Informa
 	help="Subject of the mail [default: %default]" )
 parser.add_option( '-f', '--from', dest='frm', default='Fachschaft Informatik <fsinf@fsinf.at>',
 	help="From-header of the mail [default: %default]" )
+parser.add_option( '-t', '--to',
+	help="Set the TO: header. The addresses will receive the mail mulitiple times if the number of recipients is larger than --count." )
 parser.add_option( '--recipients', default="recipients.txt", metavar="FILE",
 	help="A file that lists all the recipients, one on each line [default: %default]" )
 parser.add_option( '--blacklist', default="blacklist.txt", metavar="FILE",
@@ -82,6 +84,8 @@ Subject: """ + options.subject + """
 Content-Type: text/plain; charset=utf-8
 Content-Transfer-Encoding: 8bit
 """
+if options.to:
+	mail_header += "To: %s\n"%(options.to)
 
 # assemble a mail:
 def assemble_mail( bcc ):
