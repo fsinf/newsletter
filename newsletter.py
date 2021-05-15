@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os, sys, time, subprocess
 from optparse import OptionParser
+import email
 
 parser = OptionParser()
 parser.add_option( '-s', '--subject', default='Newsletter der Fachschaft Informatik',
@@ -78,9 +79,11 @@ if not options.no_footer:
 recipients = [ x for x in recipients if x not in blacklist ]
 #recipients = list( map( get_address, recipients ) )
 
+encoded_subject = email.header.Header(options.subject).encode()
 
 mail_header = """From: """ + options.frm + """
-Subject: """ + options.subject + """
+Subject: """ + encoded_subject + """
+MIME-Version: 1.0
 Content-Type: text/plain; charset=utf-8
 Content-Transfer-Encoding: 8bit
 """
