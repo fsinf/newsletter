@@ -1,16 +1,16 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 """
 This program is designed to send our regular newsletter[1] to a list of
 students. Its essentially a mass-mailing script with defaults that fit our
 needs.
 
-This script is written in pure python 3 and requires no additional libraries
-except a sendmail implementation.
+This script is written in pure python 3
 
 [1] http://fsinf.at/newsletter
 
 Copyright 2009, 2010 Mathias Ertl
+Copyright 2021 David Kaufmann
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -26,99 +26,89 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os, sys, time, subprocess
-from optparse import OptionParser
-import email
+import argparse, subprocess, sys, time
+from email.message import EmailMessage
+from email.policy import SMTP
 
-parser = OptionParser()
-parser.add_option( '-s', '--subject', default='Newsletter der Fachschaft Informatik',
-	help="Subject of the mail [default: %default]" )
-parser.add_option( '-f', '--from', dest='frm', default='Fachschaft Informatik <fsinf@fsinf.at>',
-	help="From-header of the mail [default: %default]" )
-parser.add_option( '-t', '--to',
-	help="Set the TO: header. The addresses will receive the mail mulitiple times if the number of recipients is larger than --count." )
-parser.add_option( '--recipients', default="recipients.txt", metavar="FILE",
-	help="A file that lists all the recipients, one on each line [default: %default]" )
-parser.add_option( '--blacklist', default="blacklist.txt", metavar="FILE",
-	help="A file that lists all the recipients that no longer want to receive this newsletter - same format as the \"recipients\" parameter [default: %default]" )
-parser.add_option( '--newsletter', default="newsletter.txt", metavar="FILE",
-	help="A file containing the text for this newsletter [default: %default]" )
-parser.add_option( '--header', default="header.txt", metavar="FILE",
-	help="A file containing a header prefixed to every newsletter [default: %default]" )
-parser.add_option( '--no-header', action='store_true', default=False,
-	help="Do not prefix this newsletter with a header [default: %default]" )
-parser.add_option( '--footer', default="footer.txt", metavar="FILE",
-	help="A file containing a footer suffixed to every newsletter [default: %default]" )
-parser.add_option( '--no-footer', action='store_true', default=False,
-	help="Do not suffix this newsletter with a footer [default: %default]" )
-parser.add_option( '--print-mail', action='store_true', default=False,
-	help="Print the mail as it would be send and exit." )
-parser.add_option( '--count', default=200, type='int', metavar='N',
-	help="Send to N recipients at once [default: %default]" )
-parser.add_option( '--sleep', default=30, type='int', metavar='SECS',
-	help="Sleep SECS seconds before sending the next mail" )
-parser.add_option( '--dry-run', default=False, action="store_true",
-	help="Don't really send mail, only act like it" )
-options, args = parser.parse_args()
+parser = argparse.ArgumentParser(
+        description='Newsletter sending script.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('-s', '--subject', default='Newsletter der Fachschaft Informatik',
+        help="Subject of the mail")
+parser.add_argument('-f', '--from', dest='frm', default='Fachschaft Informatik <fsinf@fsinf.at>',
+        help="From header of the mail")
+parser.add_argument('-t', '--to', default='noreply@fsinf.at',
+        help="To header of the mail. The addresses will receive the mail mulitiple times if the number of recipients is larger than --count.")
+parser.add_argument('--recipients', default="recipients.txt", metavar="FILE",
+        help="A file that lists all the recipients, one on each line")
+parser.add_argument('--blacklist', default="blacklist.txt", metavar="FILE",
+        help="A file that lists all the recipients that no longer want to receive this newsletter - same format as the \"recipients\" parameter")
+parser.add_argument('--newsletter', default="newsletter.txt", metavar="FILE",
+        help="A file containing the text for this newsletter")
+parser.add_argument('--header', default="header.txt", metavar="FILE",
+        help="A file containing a header prefixed to every newsletter")
+parser.add_argument('--no-header', action='store_true', default=False,
+        help="Do not prefix this newsletter with a header")
+parser.add_argument('--footer', default="footer.txt", metavar="FILE",
+        help="A file containing a footer suffixed to every newsletter")
+parser.add_argument('--no-footer', action='store_true', default=False,
+        help="Do not suffix this newsletter with a footer")
+parser.add_argument('--print-mail', action='store_true', default=False,
+        help="Print the mail as it would be send and exit.")
+parser.add_argument('--count', default=100, type=int, metavar='N',
+        help="Send to N recipients at once")
+parser.add_argument('--sleep', default=120, type=int, metavar='SECS',
+        help="Sleep SECS seconds before sending the next mail")
+parser.add_argument('--dry-run', default=False, action="store_true",
+        help="Don't really send mail, only act like it")
+args = parser.parse_args()
 
-bcc_count = options.count
+# read files
+recipients = open(args.recipients).read().split()
+blacklist = open(args.blacklist).read().split()
+newsletter = open(args.newsletter, 'r').read()
+header, footer = "", ""
+if not args.no_header:
+    header = open(args.header, 'r').read()
+if not args.no_footer:
+    footer = open(args.footer, 'r').read()
 
-# read initial data - it is important that we do this right away so that we 
-# fail if any data is missing *before* anything is send over the wire.
-recipients = open( options.recipients ).read().split()
-blacklist = open( options.blacklist ).read().split()
-newsletter = open( options.newsletter, 'r' ).read()
-header, footer = None, None
-if not options.no_header:
-	header = open( options.header, 'r' ).read()
-if not options.no_footer:
-	footer = open( options.footer, 'r' ).read()
-
-# filter out those in blacklist (google "list-comprehension" if you don't
-# understand the code)
+# remove email addresses contained in blacklist
 recipients = [ x for x in recipients if x not in blacklist ]
-#recipients = list( map( get_address, recipients ) )
-
-encoded_subject = email.header.Header(options.subject).encode()
-
-mail_header = """From: """ + options.frm + """
-Subject: """ + encoded_subject + """
-MIME-Version: 1.0
-Content-Type: text/plain; charset=utf-8
-Content-Transfer-Encoding: 8bit
-"""
-if options.to:
-	mail_header += "To: %s\n"%(options.to)
-
-# assemble a mail:
-def assemble_mail( bcc ):
-	mail = mail_header + bcc + '\n'
-	if not options.no_header:
-		mail += header + '\n'
-	mail += newsletter + '\n'
-	if not options.no_footer:
-		mail += footer
-	return mail
-
-if options.print_mail:
-	bcc = "Bcc: <bcc addresses>\n"
-	print( assemble_mail( bcc ) )
-	sys.exit(0)
 
 offset = 0
-while offset < len( recipients ):
-	print( '%s...' %( len( recipients ) - offset ), end=" " )
-	sys.stdout.flush()
+while offset < len(recipients):
+    print('Mails to send: {}'.format(len(recipients)-offset), end="\r")
+    sys.stdout.flush()
 
-	if not options.dry_run:
-		bcc_list = recipients[offset:][:bcc_count]
-		bcc = 'Bcc: ' + ', '.join( bcc_list ) + "\n"
-		mail = assemble_mail( bcc )
+    mail = EmailMessage()
 
-		sendmail = [ '/usr/sbin/sendmail', '-oi', '-t' ]
-		p = subprocess.Popen( sendmail, stdin=subprocess.PIPE )
-		stdout, stderr = p.communicate( mail.encode('utf_8') )
+    mail.add_header("From", args.frm)
 
-	# increment counter
-	offset += bcc_count
-	time.sleep( options.sleep )
+    if args.to:
+        mail.add_header("To", args.to)
+
+    mail.add_header("Subject", args.subject)
+    mail.add_header("MIME-Version", "1.0")
+
+    mail.set_content("{}{}{}".format(header, newsletter, footer), cte="quoted-printable")
+
+    # add recipients to bcc
+    bcc_list = recipients[offset:][:args.count]
+    mail.add_header("Bcc", ', '.join(bcc_list))
+
+    if args.print_mail:
+        print(mail)
+
+    if not args.dry_run:
+        sendmail = [ '/usr/sbin/sendmail', '-oi', '-t' ]
+        p = subprocess.Popen(sendmail, stdin=subprocess.PIPE)
+        # policy is required that escaping is done properly
+        stdout, stderr = p.communicate(mail.as_string(policy=SMTP).encode('utf-8'))
+
+    # increment counter
+    offset += args.count
+    time.sleep(args.sleep)
+
+# print "Done" and clear line
+print ("Done.\u001b[0K")
