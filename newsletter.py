@@ -78,7 +78,8 @@ recipients = [ x for x in recipients if x not in blacklist ]
 
 offset = 0
 while offset < len(recipients):
-    print('Mails to send: {}'.format(len(recipients)-offset), end="\r")
+    # print number of addresses still to handle and clear line
+    print('Mails to send: {}\u001b[0K'.format(len(recipients)-offset), end="\r")
     sys.stdout.flush()
 
     mail = EmailMessage()
@@ -91,7 +92,8 @@ while offset < len(recipients):
     mail.add_header("Subject", args.subject)
     mail.add_header("MIME-Version", "1.0")
 
-    mail.set_content("{}{}{}".format(header, newsletter, footer), cte="quoted-printable")
+    # quoted-printable is still more common, but we have upstream autoconvert, so stick to utf8
+    mail.set_content("{}{}{}".format(header, newsletter, footer), cte="8bit")
 
     # add recipients to bcc
     bcc_list = recipients[offset:][:args.count]
