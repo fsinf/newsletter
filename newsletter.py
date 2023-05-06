@@ -70,8 +70,8 @@ parser.add_argument('--personalized', default=False, action="store_true",
 args = parser.parse_args()
 
 # read files
-recipients = open(args.recipients).read().split()
-blacklist = open(args.blacklist).read().split()
+recipients = open(args.recipients).read().splitlines()
+blacklist = open(args.blacklist).read().splitlines()
 newsletter = open(args.newsletter, 'r').read()
 header, footer = "", ""
 if not args.no_header:
@@ -80,7 +80,8 @@ if not args.no_footer:
     footer = open(args.footer, 'r').read()
 
 # remove email addresses contained in blacklist
-recipients = [x for x in recipients if x not in blacklist]
+for entry in blacklist:
+    recipients = [r for r in recipients if entry not in r]
 
 offset = 0
 while offset < len(recipients):
@@ -95,8 +96,7 @@ while offset < len(recipients):
     if args.personalized:
         mail.add_header("To", recipients[offset])
     else:
-        if args.to:
-            mail.add_header("To", args.to)
+        mail.add_header("To", args.to)
 
         # add recipients to bcc
         bcc_list = recipients[offset:][:args.count]
