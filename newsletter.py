@@ -65,6 +65,8 @@ parser.add_argument('--sleep', default=120, type=int, metavar='SECS',
                     help="Sleep SECS seconds before sending the next mail")
 parser.add_argument('--dry-run', default=False, action="store_true",
                     help="Don't really send mail, only act like it")
+parser.add_argument('--personalized', default=False, action="store_true",
+                    help="Send one mail per address, also put address in TO header, implies count=1")
 args = parser.parse_args()
 
 # read files
@@ -90,8 +92,15 @@ while offset < len(recipients):
 
     mail.add_header("From", args.frm)
 
-    if args.to:
-        mail.add_header("To", args.to)
+    if args.personalized:
+        mail.add_header("To", recipients[offset])
+    else:
+        if args.to:
+            mail.add_header("To", args.to)
+
+        # add recipients to bcc
+        bcc_list = recipients[offset:][:args.count]
+        mail.add_header("Bcc", ', '.join(bcc_list))
 
     mail.add_header("Subject", args.subject)
     mail.add_header("MIME-Version", "1.0")
@@ -99,19 +108,19 @@ while offset < len(recipients):
     # quoted-printable is still more common, but we have upstream autoconvert, so stick to utf8
     mail.set_content("{}{}{}".format(header, newsletter, footer), charset="utf-8", cte="8bit")
 
-    # add recipients to bcc
-    bcc_list = recipients[offset:][:args.count]
-    mail.add_header("Bcc", ', '.join(bcc_list))
-
     if args.print_mail:
         print(mail)
+        sys.exit()
 
     if not args.dry_run:
         smtp = smtplib.SMTP("localhost")
         smtp.send_message(mail)
 
     # increment counter
-    offset += args.count
+    if args.personalized:
+        offset += 1
+    else:
+        offset += args.count
     time.sleep(args.sleep)
 
 # print "Done" and clear line
