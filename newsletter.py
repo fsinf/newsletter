@@ -31,12 +31,15 @@ import argparse
 import sys
 import time
 import smtplib
+import csv
 from email.message import EmailMessage
 from email.policy import SMTPUTF8
+from email.utils import formataddr
+import jinja2
 
 parser = argparse.ArgumentParser(
-        description='Newsletter sending script.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    description='Newsletter sending script.',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('-s', '--subject', default='Newsletter der Fachschaft Informatik',
                     help="Subject of the mail")
 parser.add_argument('-f', '--from', dest='frm', default='Fachschaft Informatik <fsinf@fsinf.at>',
@@ -66,18 +69,31 @@ parser.add_argument('--sleep', default=120, type=int, metavar='SECS',
 parser.add_argument('--dry-run', default=False, action="store_true",
                     help="Don't really send mail, only act like it")
 parser.add_argument('--personalized', default=False, action="store_true",
-                    help="Send one mail per address, also put address in TO header, implies count=1")
+                    help="Send one mail per address, allow parameter line[0..x] for message, put address in TO header, implies count=1")
 args = parser.parse_args()
 
 # read files
-recipients = open(args.recipients).read().splitlines()
-blacklist = open(args.blacklist).read().splitlines()
-newsletter = open(args.newsletter, 'r').read()
+with open(args.recipients, encoding="utf-8", newline='') as f:
+    reader = csv.reader(f, delimiter=',', quotechar='"')
+    recipients = list(reader)
+
+with open(args.blacklist, encoding="utf-8") as f:
+    blacklist = f.read().splitlines()
+
+environment = jinja2.Environment()
+with open(args.newsletter, 'r', encoding="utf-8") as f:
+    template = environment.from_string(f.read())
+
 header, footer = "", ""
 if not args.no_header:
-    header = open(args.header, 'r').read()
+    with open(args.header, 'r', encoding="utf-8") as f:
+        header = f.read()
 if not args.no_footer:
-    footer = open(args.footer, 'r').read()
+    with open(args.footer, 'r', encoding="utf-8") as f:
+        footer = f.read()
+
+if args.personalized:
+    args.count = 1
 
 # remove email addresses contained in blacklist
 for entry in blacklist:
@@ -86,7 +102,7 @@ for entry in blacklist:
 offset = 0
 while offset < len(recipients):
     # print number of addresses still to handle and clear line
-    print('Mails to send: {}\u001b[0K'.format(len(recipients)-offset), end="\r")
+    print(f"Mails to send: {len(recipients) - offset}\u001b[0K", end="\r")
     sys.stdout.flush()
 
     mail = EmailMessage(policy=SMTPUTF8)
@@ -94,19 +110,23 @@ while offset < len(recipients):
     mail.add_header("From", args.frm)
 
     if args.personalized:
-        mail.add_header("To", recipients[offset])
+        newsletter = template.render(line=recipients[offset])
+        cur = recipients[offset]
+        mail.add_header("To", formataddr((f"{cur[2]} {cur[1]}", cur[3])))
+        print(mail["To"])
     else:
+        newsletter = template.render()
         mail.add_header("To", args.to)
 
-        # add recipients to bcc
-        bcc_list = recipients[offset:][:args.count]
+        # add recipients to bcc (first field contains email address)
+        bcc_list = recipients[offset:][:args.count][0]
         mail.add_header("Bcc", ', '.join(bcc_list))
 
     mail.add_header("Subject", args.subject)
     mail.add_header("MIME-Version", "1.0")
 
     # quoted-printable is still more common, but we have upstream autoconvert, so stick to utf8
-    mail.set_content("{}{}{}".format(header, newsletter, footer), charset="utf-8", cte="8bit")
+    mail.set_content(f"{header}{newsletter}{footer}", charset="utf-8", cte="8bit")
 
     if args.print_mail:
         print(mail)
@@ -117,10 +137,7 @@ while offset < len(recipients):
         smtp.send_message(mail)
 
     # increment counter
-    if args.personalized:
-        offset += 1
-    else:
-        offset += args.count
+    offset += args.count
     time.sleep(args.sleep)
 
 # print "Done" and clear line
